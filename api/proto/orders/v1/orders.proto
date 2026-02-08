@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package orders.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/trade-offer-app/pkg/orders/v1;ordersv1";
+
+//тип заказа
+enum OrderType {
+  TYPE_UNSPECIFIED = 0; //неизвестный тип заказа
+  TYPE_BUY = 1; //покупка
+  TYPE_SELL = 2;  //продажа
+}
+
+//Статус заказа
+enum OrderStatus {
+  STATUS_UNKNOWN = 0; //неизвестный статус
+  STATUS_PENDING = 1; //в обработке
+  STATUS_EXECUTED = 2; //обработан
+  STATUS_CANCELED = 3; //отменён
+}
+service OrderService {
+  //CRUD операции
+  rpc CreateOrder(CreateOrderRequest) returns (OrderResponse);
+  rpc GetOrder (GetOrderRequest) returns (Order);
+  rpc ListOrders (ListOrderRequest) returns (ListOrderResponse);
+  rpc DeleteOrder(CancelOrder) returns (CancelOrderResponse);
+
+  //другие операции
+
+  //стриминг обновлений для websockets
+  rpc WatchOrders(WatchOrdersRequest) returns (stream Order);
+}
+
+//точный тип данных для работы с деньгами
+//будет использоваться в запросе на покупку и продажу
+//придумал такой подход не сам, но суть ясна
+//есть целая часть и нано часть (9 символов после запятой)
+//суть этой реализации в том, что мы явно отделяем nanos чтобы не потерять копейки при математических операциях
+message Decimal {
+  //например у нас есть число 48.578453712
+  int64 units = 1; //целая часть (48)
+  int32 nanos = 2; //часть после запятой (578453712)
+}
+
+//структура заказа
+message Order {
+  string id = 1; //идентификатор заказа
+  string user_id = 2; //идентификатор пользователя, совершившего заказ
+  OrderType type = 3; //тип операции (продажа/покупка)
+  OrderStatus status = 4; //статус заказа
+  google.protobuf.Timestamp created_at = 5; // время создания заказа
+}
+
+//тело запроса на покупку/продажу
+message CreateOrderRequest {
+  string user_id = 1; //айди пользователя который хочет совершить операцию
+  string pair = 2; //какой хотим совершить обмен (например BTC/USD)
+  Decimal amount = 3; //сколько покупаем/продаём монет (используется кастомный тип)
+  Decimal price = 4; //сколько мы хотим заплатить за покупку/получить за продажу (также используем кастомный тип)
+  OrderType type = 5; //тип операции (покупка/продажа)
+  string idempotency_key = 6; //решение проблемы дубликатов
+}
+
+//тело ответа
+message OrderResponse {
+  string order_id = 1;
+  OrderStatus status = 2;
+  OrderType type = 3;
+}
+
+//Метод получения заказа
+message GetOrderRequest {
+  string id = 1; //айди ордера
+  string user_id = 2; //айди пользователя делающего запрос (можно реализовать закрытый доступ по какому-то параметру, но пока есть как есть)
+}
+
+//метод запроса списка ордеров у пользователя с пагинацией
+message ListOrderRequest {
+  string user_id = 1; //айди юзера, чьи операции мы хотим получить
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+//ответ на запрос операций
+message ListOrderResponse {
+  repeated Order orders = 1;
+  string next_page_token = 2; //строка хранящая параметр пагинации
+}
+
+//Запрос на удаление(деактивацию) объявления
+message CancelOrder {
+  string id = 1;
+}
+
+//Ответ на запрос удаление (деактивацию) объявления
+message CancelOrderResponse {
+  Order DeletedOrder = 1;
+  bool success = 2;
+}
+
+//сообщение, хранящее user_id для пользователей, чьи ордеры требуют обработки в kafka
+message WatchOrdersRequest {
+ string user_id = 1;
+}
